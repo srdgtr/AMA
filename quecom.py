@@ -15,27 +15,27 @@ from bol_export_file import get_file
 from sqlalchemy import create_engine, MetaData, Table,update
 from sqlalchemy.engine.url import URL
 
-alg_config = configparser.ConfigParser()
-alg_config.read(Path.home() / "bol_export_files.ini")
+ini_config = configparser.ConfigParser()
+ini_config.read(Path.home() / "bol_export_files.ini")
 config_db = dict(
     drivername="mariadb",
-    username=alg_config.get("database leveranciers", "user"),
-    password=alg_config.get("database leveranciers", "password"),
-    host=alg_config.get("database leveranciers", "host"),
-    port=alg_config.get("database leveranciers", "port"),
-    database=alg_config.get("database leveranciers", "database"),
+    username=ini_config.get("database leveranciers", "user"),
+    password=ini_config.get("database leveranciers", "password"),
+    host=ini_config.get("database leveranciers", "host"),
+    port=ini_config.get("database leveranciers", "port"),
+    database=ini_config.get("database leveranciers", "database"),
 )
 odin_orders = dict(
     drivername="mariadb",
-    username=alg_config.get("database odin", "user"),
-    password=alg_config.get("database odin", "password"),
-    host=alg_config.get("database odin", "host"),
-    port=alg_config.get("database odin", "port"),
-    database=alg_config.get("database odin", "database"),
+    username=ini_config.get("database odin", "user"),
+    password=ini_config.get("database odin", "password"),
+    host=ini_config.get("database odin", "host"),
+    port=ini_config.get("database odin", "port"),
+    database=ini_config.get("database odin", "database"),
 )
 engine = create_engine(URL.create(**config_db))
 engine_odin = create_engine(URL.create(**odin_orders))
-quecom_key = alg_config.get("quecom website", "api_key")
+quecom_key = ini_config.get("quecom website", "api_key")
 dbx = dropbox.Dropbox(os.environ.get("DROPBOX"))
 date = datetime.now().strftime("%c").replace(":", "-")
 metadata = MetaData()
