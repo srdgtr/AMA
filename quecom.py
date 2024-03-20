@@ -35,11 +35,12 @@ if not dropbox_key:
      
 dbx = dropbox.Dropbox(dropbox_key)
 date = datetime.now().strftime("%c").replace(":", "-")
+scraper_name = Path.cwd().name
 metadata = MetaData()
 
-logger = logging.getLogger("ama_loging")
+logger = logging.getLogger(f"{scraper_name}_loging")
 logging.basicConfig(
-    filename="ama_" + datetime.now().strftime("%V") + ".log",
+    filename=f"{scraper_name}{datetime.now().strftime('%V')}.log",
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )  # nieuwe log elke week
@@ -149,11 +150,11 @@ if datetime.now().hour < 9 > 0:  # alleen in de nacht assortiment, want verander
             )
             .drop(columns=["description"])
         )
-        hele_assortiment_pd.to_csv(f"AMA_huidige_producten_{date}.csv", index=False)
+        hele_assortiment_pd.to_csv(f"{scraper_name}_huidige_producten_{date}.csv", index=False)
     else:
         sys.exit()
 else:
-    hele_assortiment_pd = pd.read_csv(max(Path.cwd().glob("AMA_huidige_producten*.csv"), key=os.path.getmtime))
+    hele_assortiment_pd = pd.read_csv(max(Path.cwd().glob(f"{scraper_name}_huidige_producten*.csv"), key=os.path.getmtime))
 
 
 def get_current_stock(apikey, version):
@@ -212,18 +213,18 @@ huidige_assortiment_voorraad = (
     )
 )
 
-huidige_assortiment_voorraad.to_csv("AMA_" + date + ".csv", index=False)
+huidige_assortiment_voorraad.to_csv(f"{scraper_name}_{date}.csv", index=False)
 
-latest_file = max(glob.iglob("AMA_*.csv"), key=os.path.getctime)
+latest_file = max(glob.iglob(f"{scraper_name}_*.csv"), key=os.path.getctime)
 with open(latest_file, "rb") as f:
     dbx.files_upload(
         f.read(),
-        "/macro/datafiles/AMA/" + latest_file,
+        f"/macro/datafiles/{scraper_name}/" + latest_file,
         mode=dropbox.files.WriteMode("overwrite", None),
         mute=True,
     )
 
-huidige_assortiment_voorraad[['Artikel', 'prijs']].rename(columns={'prijs': 'Inkoopprijs exclusief','Artikel':'sku'}).to_csv("AMA_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
+huidige_assortiment_voorraad[['Artikel', 'prijs']].rename(columns={'prijs': 'Inkoopprijs exclusief','Artikel':'sku'}).to_csv(f"{scraper_name}_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
 
 product_info = huidige_assortiment_voorraad.rename(
     columns={
@@ -236,7 +237,7 @@ product_info = huidige_assortiment_voorraad.rename(
         # :"promo_inkoop_actief",
         # "price_advice":"advies_prijs",
         "Art. omschrijving":"omschrijving",
-}).assign(onze_sku = lambda x: Path.cwd().name + x['Artikel'].astype(str), import_date = datetime.now())
+}).assign(onze_sku = lambda x: scraper_name + x['Artikel'].astype(str), import_date = datetime.now())
 
 insert_data(engine, product_info)
 
