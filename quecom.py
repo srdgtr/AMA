@@ -10,33 +10,32 @@ import sys
 import os, glob
 import dropbox
 
-sys.path.insert(0, str(Path.home()))
+sys.path.insert(0, str(Path.cwd().parent))
 from bol_export_file import get_file
+from import_leveranciers.import_data import insert_data, engine
+
 from sqlalchemy import create_engine, MetaData, Table,update
 from sqlalchemy.engine.url import URL
 
 ini_config = configparser.ConfigParser()
 ini_config.read(Path.home() / "bol_export_files.ini")
 config_db = dict(
-    drivername="mariadb",
-    username=ini_config.get("database leveranciers", "user"),
-    password=ini_config.get("database leveranciers", "password"),
-    host=ini_config.get("database leveranciers", "host"),
-    port=ini_config.get("database leveranciers", "port"),
-    database=ini_config.get("database leveranciers", "database"),
-)
-odin_orders = dict(
-    drivername="mariadb",
-    username=ini_config.get("database odin", "user"),
-    password=ini_config.get("database odin", "password"),
-    host=ini_config.get("database odin", "host"),
-    port=ini_config.get("database odin", "port"),
-    database=ini_config.get("database odin", "database"),
-)
+        drivername="mariadb",
+        username=ini_config.get("database odin", "user"),
+        password=ini_config.get("database odin", "password"),
+        host=ini_config.get("database odin", "host"),
+        port=ini_config.get("database odin", "port"),
+        database=ini_config.get("database odin", "database"),
+    )
 engine = create_engine(URL.create(**config_db))
-engine_odin = create_engine(URL.create(**odin_orders))
 quecom_key = ini_config.get("quecom website", "api_key")
-dbx = dropbox.Dropbox(os.environ.get("DROPBOX"))
+dropbox_key = os.environ.get('DROPBOX')
+if not dropbox_key:
+     config = configparser.ConfigParser()
+     config.read(Path.home() / "bol_export_files.ini")
+     dropbox_key = config.get("dropbox", "api_dropbox")
+     
+dbx = dropbox.Dropbox(dropbox_key)
 date = datetime.now().strftime("%c").replace(":", "-")
 metadata = MetaData()
 
@@ -62,10 +61,10 @@ def check_limit(request):
         sleep(3600)
 
 
-bol_orders = "SELECT I.orderid,I.order_orderitemid,I.dropship FROM orders_info_bol I WHERE I.created_on_artikel > DATE_ADD(NOW(), INTERVAL -1 MONTH) AND I.order_offerreference LIKE 'AMA%%' ORDER BY I.updated_on_artikel DESC"
+bol_orders = "SELECT I.orderid,I.order_orderitemid,I.dropship FROM orders_info_bol I WHERE I.created_on_artikel > DATE_ADD(NOW(), INTERVAL -1 MONTH) AND I.offer_sku LIKE 'AMA%%' ORDER BY I.updated_on_artikel DESC"
 blok_orders = "SELECT I.order_line_id,I.dropship FROM blokker_orders O LEFT JOIN blokker_order_items I ON O.commercialid = I.commercialid WHERE O.created_date > DATE_ADD(NOW(), INTERVAL -1 MONTH) AND I.offer_sku LIKE 'AMA%%' ORDER BY O.created_date DESC"
-orders_bol = pd.read_sql(bol_orders,engine_odin).query("dropship < 3 or dropship != dropship")
-orders_blok  = pd.read_sql(blok_orders,engine_odin).query("dropship < 3 or dropship != dropship")
+orders_bol = pd.read_sql(bol_orders,engine).query("dropship < 3 or dropship != dropship")
+orders_blok  = pd.read_sql(blok_orders,engine).query("dropship < 3 or dropship != dropship")
 
 def get_detail_order(apikey, version,order_ref):
     order = requests.get(f"https://quecom.eu/api/{version}/order/reference/{order_ref}", headers={"Authorization": f"Bearer {apikey}"})
@@ -75,25 +74,25 @@ def get_detail_order(apikey, version,order_ref):
         return order.json()
 
 def set_order_info_db_bol(order_info, track_en_trace_url, track_en_trace_num):
-    orders_info_bol = Table("orders_info_bol", metadata, autoload_with=engine_odin)
+    orders_info_bol = Table("orders_info_bol", metadata, autoload_with=engine)
     logger.info(f"start stap 3 bol {order_info,track_en_trace_url, track_en_trace_num}")
     drop_send = (
         update(orders_info_bol)
         .where(orders_info_bol.columns.orderid == order_info)
         .values(dropship="3", t_t_dropshipment=track_en_trace_url, order_id_leverancier=track_en_trace_num)
     )
-    with engine_odin.begin() as conn:
+    with engine.begin() as conn:
         conn.execute(drop_send)
 
 def set_order_info_db_blokker(order_info, track_en_trace_url, track_en_trace_num):
-    orders_info_blokker = Table("blokker_order_items", metadata, autoload_with=engine_odin)
+    orders_info_blokker = Table("blokker_order_items", metadata, autoload_with=engine)
     logger.info(f"start stap 3 blokker {order_info}")
     drop_send = (
         update(orders_info_blokker)
         .where(orders_info_blokker.columns.order_line_id == order_info)
         .values(dropship="3", t_t_dropshipment=track_en_trace_url, order_id_leverancier=track_en_trace_num)
     )
-    with engine_odin.begin() as conn:
+    with engine.begin() as conn:
         conn.execute(drop_send)
 
 for row in orders_bol.itertuples():
@@ -226,29 +225,21 @@ with open(latest_file, "rb") as f:
         mute=True,
     )
 
-# ama_info_db = ama_info[
-#     [
-#         "eigen_sku",
-#         "sku",
-#         "ean",
-#         "voorraad",
-#         "merk",
-#         "prijs",
-#         "advies_prijs",
-#         "category",
-#         "gewicht",
-#         "url_plaatje",
-#         "url_artikel",
-#         "product_title",
-#         "lange_omschrijving",
-#         "verpakings_eenheid",
-#         "lk",
-#     ]
-# ]
+huidige_assortiment_voorraad[['Artikel', 'prijs']].rename(columns={'prijs': 'Inkoopprijs exclusief','Artikel':'sku'}).to_csv("AMA_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
 
-# huidige_datum = datetime.now().strftime("%d_%b_%Y")
-# ama_info_db.to_sql(
-#     f"{current_folder}_dag_{huidige_datum}", con=engine, if_exists="replace", index=False, chunksize=1000
-# )
+product_info = huidige_assortiment_voorraad.rename(
+    columns={
+        # "sku":"onze_sku",
+        "EAN nummer":"ean",
+        "Merk":"merk",
+        "Beschikbaar":"voorraad",
+        "prijs":"inkoop_prijs",
+        # :"promo_inkoop_prijs",
+        # :"promo_inkoop_actief",
+        # "price_advice":"advies_prijs",
+        "Art. omschrijving":"omschrijving",
+}).assign(onze_sku = lambda x: Path.cwd().name + x['Artikel'].astype(str), import_date = datetime.now())
 
-# engine.dispose()
+insert_data(engine, product_info)
+
+engine.dispose()
