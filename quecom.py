@@ -31,9 +31,7 @@ engine = create_engine(URL.create(**config_db))
 quecom_key = ini_config.get("quecom website", "api_key")
 dropbox_key = os.environ.get('DROPBOX')
 if not dropbox_key:
-     config = configparser.ConfigParser()
-     config.read(Path.home() / "bol_export_files.ini")
-     dropbox_key = config.get("dropbox", "api_dropbox")
+     dropbox_key = ini_config.get("dropbox", "api_dropbox")
      
 dbx = dropbox.Dropbox(dropbox_key)
 date = datetime.now().strftime("%c").replace(":", "-")
