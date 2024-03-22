@@ -12,7 +12,7 @@ import dropbox
 
 sys.path.insert(0, str(Path.cwd().parent))
 from bol_export_file import get_file
-from import_leveranciers.import_data import insert_data, engine
+from process_results.process_data import save_to_db, save_to_dropbox, save_to_dropbox_vendit
 
 from sqlalchemy import create_engine, MetaData, Table,update
 from sqlalchemy.engine.url import URL
@@ -215,14 +215,8 @@ huidige_assortiment_voorraad = (
 
 huidige_assortiment_voorraad.to_csv(f"{scraper_name}_{date}.csv", index=False)
 
-latest_file = max(glob.iglob(f"{scraper_name}_*.csv"), key=os.path.getctime)
-with open(latest_file, "rb") as f:
-    dbx.files_upload(
-        f.read(),
-        f"/macro/datafiles/{scraper_name}/" + latest_file,
-        mode=dropbox.files.WriteMode("overwrite", None),
-        mute=True,
-    )
+latest_file = max(Path.cwd().glob(f"{scraper_name}_*.csv"), key=os.path.getctime)
+save_to_dropbox(latest_file, scraper_name)
 
 huidige_assortiment_voorraad[['Artikel', 'prijs']].rename(columns={'prijs': 'Inkoopprijs exclusief','Artikel':'sku'}).to_csv(f"{scraper_name}_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
 
@@ -235,10 +229,11 @@ product_info = huidige_assortiment_voorraad.rename(
         "prijs":"inkoop_prijs",
         # :"promo_inkoop_prijs",
         # :"promo_inkoop_actief",
+        "categorie" :"category",
         # "price_advice":"advies_prijs",
         "Art. omschrijving":"omschrijving",
 }).assign(onze_sku = lambda x: scraper_name + x['Artikel'].astype(str), import_date = datetime.now())
 
-insert_data(engine, product_info)
+save_to_db(product_info)
 
 engine.dispose()
