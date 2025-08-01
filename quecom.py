@@ -7,18 +7,27 @@ import pandas as pd
 import numpy as np
 import requests
 import sys
-import os, glob
+import os
 import dropbox
+from sqlalchemy import create_engine, MetaData, Table,update
+from sqlalchemy.engine.url import URL
 
 sys.path.insert(0, str(Path.cwd().parent))
 from bol_export_file import get_file
 from process_results.process_data import save_to_db, save_to_dropbox, save_to_dropbox_vendit
 
-from sqlalchemy import create_engine, MetaData, Table,update
-from sqlalchemy.engine.url import URL
-
-ini_config = configparser.ConfigParser()
+ini_config = configparser.ConfigParser(interpolation=None)
 ini_config.read(Path.home() / "bol_export_files.ini")
+scraper_name = Path.cwd().name
+korting_percent = int(ini_config.get("stap 1 vaste korting", scraper_name.lower()).strip("%"))
+quecom_key = ini_config.get("quecom website", "api_key")
+dropbox_key = os.environ.get('DROPBOX')
+if not dropbox_key:
+     dropbox_key = ini_config.get("dropbox", "api_dropbox")
+     
+dbx = dropbox.Dropbox(dropbox_key)
+date = datetime.now().strftime("%c").replace(":", "-")
+
 config_db = dict(
         drivername="mariadb",
         username=ini_config.get("database odin", "user"),
@@ -28,14 +37,7 @@ config_db = dict(
         database=ini_config.get("database odin", "database"),
     )
 engine = create_engine(URL.create(**config_db))
-quecom_key = ini_config.get("quecom website", "api_key")
-dropbox_key = os.environ.get('DROPBOX')
-if not dropbox_key:
-     dropbox_key = ini_config.get("dropbox", "api_dropbox")
-     
-dbx = dropbox.Dropbox(dropbox_key)
-date = datetime.now().strftime("%c").replace(":", "-")
-scraper_name = Path.cwd().name
+
 metadata = MetaData()
 
 logger = logging.getLogger(f"{scraper_name}_loging")
@@ -57,6 +59,7 @@ def check_limit(request):
     remaining_limit = int(request.headers.get("X-Rate-Limit-Remaining", 0))
     if remaining_limit < 1:
         print("no queries left")
+        logger.info("no queries left")
         sleep(3600)
 
 
@@ -118,7 +121,7 @@ def get_assortiment(apikey, version):
     headers = {"Authorization": f"Bearer {apikey}"}
     artikelen = requests.get(f"https://quecom.eu/api/{version}/assortment", headers=headers)
     if artikelen.status_code == 429:
-        print("to many requests")
+        logger.info("to many requests")
     if artikelen.status_code == 200:
         check_limit(artikelen)
         assortiment.extend(artikelen.json()["products"])
@@ -131,12 +134,12 @@ def get_assortiment(apikey, version):
                 else:
                     break
             except KeyError:
-                print("no_key")
+                logger.info("no_key")
                 break
     return assortiment
 
 
-if datetime.now().hour < 9 > 0:  # alleen in de nacht assortiment, want veranderd maar 1 keer per dag
+if datetime.now().hour < 10 and datetime.now().hour > 0:  # alleen in de nacht assortiment, want veranderd maar 1 keer per dag
     hele_assortiment = get_assortiment(quecom_key, api)
     if hele_assortiment:
         hele_assortiment_pd = (
@@ -147,8 +150,8 @@ if datetime.now().hour < 9 > 0:  # alleen in de nacht assortiment, want verander
                 height_cm=lambda x: x.dimensions.str.get("height"),
                 length_cm=lambda x: x.dimensions.str.get("length"),
                 weight_kg=lambda x: x.weight.str.get("value"),
+                product_code=lambda x: pd.to_numeric(x["product_code"], errors="coerce")
             )
-            .drop(columns=["description"])
         )
         hele_assortiment_pd.to_csv(f"{scraper_name}_huidige_producten_{date}.csv", index=False)
     else:
@@ -163,7 +166,7 @@ def get_current_stock(apikey, version):
     if stock_request.status_code == 200:
         return stock_request.json()
     else:
-        stock_request.text
+        logger.error(stock_request.text)
 
 
 def get_current_price(apikey, version):
@@ -172,7 +175,7 @@ def get_current_price(apikey, version):
     if stock_request.status_code == 200:
         return stock_request.json()
     else:
-        stock_request.text
+        logger.error(stock_request.text)
 
 
 def get_current_product_groups(apikey, version):
@@ -181,8 +184,7 @@ def get_current_product_groups(apikey, version):
     if stock_request.status_code == 200:
         return stock_request.json()
     else:
-        stock_request.text
-
+        logger.error(stock_request.text)
 
 huidige_stock = get_current_stock(quecom_key, api)
 huidige_price = get_current_price(quecom_key, api)
@@ -211,6 +213,7 @@ huidige_assortiment_voorraad = (
             "price": "prijs",
         }
     )
+    .drop(columns=['Artikel Code Lev.', 'artikel_omschrijving'])
 )
 
 huidige_assortiment_voorraad.to_csv(f"{scraper_name}_{date}.csv", index=False)
@@ -227,8 +230,6 @@ product_info = huidige_assortiment_voorraad.rename(
         "Merk":"merk",
         "Beschikbaar":"voorraad",
         "prijs":"inkoop_prijs",
-        # :"promo_inkoop_prijs",
-        # :"promo_inkoop_actief",
         "categorie" :"category",
         # "price_advice":"advies_prijs",
         "Art. omschrijving":"omschrijving",
